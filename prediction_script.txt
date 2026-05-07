@@ -1,0 +1,242 @@
+mport pandas as pd 
+import numpy as np 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+
+
+data = spark.table('workspace.auto_insurance_database.motor_data_11_14').toPandas()
+
+
+df = data.copy()
+print(df.head())
+
+df.columns = df.columns.str.lower()
+
+
+df = df.drop_duplicates()
+
+df.isna().sum()
+
+
+df.dropna(subset='effective_yr', inplace = True)
+df.dropna(subset='premium', inplace = True)
+
+
+
+df[df['prod_year'].isna()]
+
+
+
+df['prod_year'] = df['prod_year'].fillna('Unknown')
+
+
+df[df['seats_num'].isna()]
+
+
+df.dropna(subset='seats_num', inplace = True)
+
+
+
+df['carrying_capacity'] = df['carrying_capacity'].fillna(0)
+df['claim_paid'] = df['claim_paid'].fillna(0)
+
+
+df.info()
+
+
+
+df['insr_begin'] = pd.to_datetime(df['insr_begin'], format = '%d-%b-%y')
+df['insr_end'] = pd.to_datetime(df['insr_end'], format = '%d-%b-%y')
+df['effective_yr'] = pd.to_numeric(df['effective_yr'], errors = 'coerce')
+df.dropna(subset='effective_yr', inplace = True)
+
+
+df['weighted_exposure'] = df['effective_yr'] * df['insured_value']
+
+
+df['insr_type'].value_counts()
+
+df['type_vehicle'].value_counts()
+
+
+
+vehicle_type_counts = df['type_vehicle'].value_counts().reset_index()
+
+sns.barplot(data = vehicle_type_counts, y = 'type_vehicle', x = 'count')
+plt.title('Count of Vehicle Types')
+plt.xlabel('Vehicle Type Count')
+plt.ylabel('Vehicle Types')
+plt.xticks(rotation = 90)
+plt.show()
+
+
+df['make'].value_counts()
+
+
+
+
+make_count = df['make'].value_counts().reset_index().head(50)
+print(make_count.head(10))
+
+
+sns.barplot(data = make_count.head(10), y = 'make', x = 'count')
+plt.title('Count of Vehicle Make (Top 10)')
+plt.xlabel('Vehicle Make Count')
+plt.ylabel('Vehicle Make')
+plt.xticks(rotation = 90)
+plt.show()
+
+
+
+
+usage_count = df['usage'].value_counts().reset_index().head(50)
+print(usage_count.head(10))
+
+
+
+
+sns.barplot(data = usage_count.head(10), y = 'usage', x = 'count')
+plt.title('Count of Vehicle Usage (Top 10)')
+plt.xlabel('Vehicle Usage Count')
+plt.ylabel('Vehicle Usage')
+plt.xticks(rotation = 90)
+plt.show()
+
+
+
+
+stat_cols = ['effective_yr', 'insured_value', 'premium', 'seats_num','carrying_capacity','ccm_ton' ,'claim_paid', 'weighted_exposure']
+
+df[stat_cols].describe().T
+
+
+
+
+df2 = df[['sex', 'insr_type','effective_yr', 'premium', 'seats_num','carrying_capacity','prod_year', 'type_vehicle', 'ccm_ton', 'make', 'usage','claim_paid','weighted_exposure']]
+
+
+df2.drop_duplicates(inplace = True)
+
+
+
+df2 = df2[df2['weighted_exposure'] > 0]
+
+
+x = df2[['sex', 'insr_type','effective_yr', 'premium', 'seats_num','carrying_capacity','prod_year', 'type_vehicle', 'ccm_ton', 'make', 'usage','claim_paid']]
+y = df2['weighted_exposure']
+
+
+from sklearn.pipeline import Pipeline 
+from sklearn.preprocessing import StandardScaler, OrdinalEncoder,FunctionTransformer
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+
+
+
+num_cols = x.select_dtypes(include=['number']).columns
+
+cat_cols = x.select_dtypes(include=['object']).columns
+
+
+num_pipe = Pipeline([
+    ('imputer', SimpleImputer(strategy = 'median')),
+    ('scaler', StandardScaler())
+])
+
+
+cat_pipe = Pipeline([
+    ('imputer', SimpleImputer(strategy = 'most_frequent')),
+    ('to_string', FunctionTransformer(lambda x: x.astype(str))),
+    ('encoder', OrdinalEncoder(handle_unknown = 'use_encoded_value', unknown_value = -50))
+])
+
+x_train, x_test, y_train, y_test = train_test_split(x, y, test_size = 0.25, random_state = 45)
+
+processor = ColumnTransformer(
+    transformers=[
+        ('num_pipe', num_pipe, num_cols),
+        ('cat_pipe', cat_pipe, cat_cols)
+    ],
+    remainder = 'drop'
+)
+
+processor 
+
+
+
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
+
+
+
+lr_pipe = Pipeline([
+    ('processor', processor),
+    ('lr_model', LinearRegression())
+])
+
+lr_pipe.fit(x_train, y_train)
+
+lr_predict = lr_pipe.predict(x_test)
+
+
+rf_pipe = Pipeline([
+    ('processor', processor),
+    ('rf_model', RandomForestRegressor())
+])
+
+rf_pipe.fit(x_train, y_train)
+rf_predict = rf_pipe.predict(x_test)
+
+
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error,  mean_absolute_percentage_error,r2_score
+print(mean_squared_error(y_test, lr_predict))
+print(mean_absolute_error(y_test, lr_predict))
+print(mean_absolute_percentage_error(y_test, lr_predict))
+print(r2_score(y_test, lr_predict))
+
+
+
+print(mean_squared_error(y_test, rf_predict))
+print(mean_absolute_error(y_test, rf_predict))
+print(mean_absolute_percentage_error(y_test, rf_predict))
+print(r2_score(y_test, rf_predict))
+
+
+
+
+rf_importance = rf_pipe.named_steps['rf_model'].feature_importances_
+rf_importance = pd.DataFrame({'feature': x_train.columns, 'importance': rf_importance})
+rf_importance = rf_importance.sort_values(by = 'importance', ascending = False)
+
+print(rf_importance)
+
+
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sns.barplot(x = 'importance', y = 'feature', data = rf_importance.sort_values(by = 'importance', ascending = False))
+plt.title('Feature Importance')
+plt.show()
+
+
+df2.groupby('effective_yr')['weighted_exposure'].mean().plot(kind = 'line', title = 'Weighted Exposure by Effective Year')
+
+
+df2.groupby('effective_yr')['weighted_exposure'].agg(['mean', 'median', 'count']).plot(kind ='line', title = 'Weighted Exposure by Effective Year')
+
+
+
+df2.groupby('effective_yr')['effective_yr'].count().plot(kind = 'line', title = 'Effective Year Count')
+
+
+
+
